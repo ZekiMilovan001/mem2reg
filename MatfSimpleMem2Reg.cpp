@@ -140,6 +140,20 @@ static bool collectUses(AllocaInst *AI,
         if (MatfVerbose) errs() << "[matf-mem2reg] erased dead alloca " << (AI->hasName()?AI->getName():"<unnamed>") << "\n";
         continue;
       }
+      
+
+      if (Stores.empty()) {
+        Value *U = UndefValue::get(AI->getAllocatedType());
+        for (LoadInst *LI : Loads) {
+          LI->replaceAllUsesWith(U);
+          LI->eraseFromParent();
+          Changed = true;
+        }
+        eraseLifetimesFor(AI);
+        if (AI->use_empty()) { AI->eraseFromParent(); Changed = true; }
+        if (MatfVerbose) errs() << "[matf-mem2reg] zero-store -> undef for " << (AI->hasName()?AI->getName():"<unnamed>") << "\n";
+        continue;
+      }
 
       if (MatfPhi && Stores.size() == 2) {
         StoreInst *S1 = Stores[0];
