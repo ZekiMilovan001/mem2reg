@@ -20,6 +20,10 @@ static cl::opt<bool> MatfVerbose(
   cl::init(false)
 );
 
+static cl::opt<bool> MatfPhi(
+  "matf-phi", cl::desc("Enable 2-branch diamond phi insertion (very restricted)"),
+  cl::init(false)
+);
 
 namespace {
 
@@ -37,7 +41,24 @@ static void eraseLifetimesFor(AllocaInst *AI) {
   for (Instruction *I : Kill) I->eraseFromParent();
 }
 
-
+static BasicBlock* findTwoPredMerge(BasicBlock *B1, BasicBlock *B2) {
+  for (BasicBlock *S1 : successors(B1)) {
+    for (BasicBlock *S2 : successors(B2)) {
+      if (S1 == S2) {
+        // check exactly two preds and they are B1,B2
+        int count = 0; bool seenB1 = false, seenB2 = false;
+        for (BasicBlock *P : predecessors(S1)) {
+          ++count;
+          if (P == B1) seenB1 = true;
+          if (P == B2) seenB2 = true;
+        }
+        if (count == 2 && seenB1 && seenB2)
+          return S1;
+      }
+    }
+  }
+  return nullptr;
+}
 
 struct MatfSimpleMem2Reg : public FunctionPass {
   static char ID;
@@ -111,6 +132,63 @@ static bool collectUses(AllocaInst *AI,
       std::vector<StoreInst*> Stores;
       std::vector<LoadInst*>  Loads;
       if (!collectUses(AI, Stores, Loads)) continue;
+
+      if (MatfPhi && Stores.size() == 2) {
+        StoreInst *S1 = Stores[0];
+        StoreInst *S2 = Stores[1];
+        BasicBlock *B1 = S1->getParent();
+        BasicBlock *B2 = S2->getParent();
+        if (B1 != B2) {
+          if (BasicBlock *M = findTwoPredMerge(B1, B2)) {
+            // Create phi at top of M
+            PHINode *Phi = PHINode::Create(AI->getAllocatedType(), 2,
+                                          AI->getName() + ".phi",
+                                          M->getFirstNonPHI());
+            Value *V1 = S1->getValueOperand();
+            Value *V2 = S2->getValueOperand();
+            Phi->addIncoming(V1, B1);
+            Phi->addIncoming(V2, B2);
+
+            // Replace loads:
+            //  - loads dominated by S1 -> V1
+            //  - loads dominated by S2 -> V2
+            //  - loads in/after the merge M -> Phi
+            bool allCovered = true;
+            for (LoadInst *LI : Loads) {
+              if (DT.dominates(S1, LI)) {
+                LI->replaceAllUsesWith(V1);
+                LI->eraseFromParent(); Changed = true;
+                continue;
+              }
+              if (DT.dominates(S2, LI)) {
+                LI->replaceAllUsesWith(V2);
+                LI->eraseFromParent(); Changed = true;
+                continue;
+              }
+              if (DT.dominates(M, LI->getParent())){
+                LI->replaceAllUsesWith(Phi);
+                LI->eraseFromParent(); Changed = true;
+                continue;
+              }
+              allCovered = false; break;
+            }
+
+            if (allCovered) {
+              S1->eraseFromParent(); S2->eraseFromParent(); Changed = true;
+              eraseLifetimesFor(AI);
+              if (AI->use_empty()) { AI->eraseFromParent(); Changed = true; }
+              if (MatfVerbose) errs() << "[matf-mem2reg] phi inserted for "
+                                      << (AI->hasName()?AI->getName():"<unnamed>")
+                                      << " at " << M->getName() << "\n";
+              continue;
+            } else {
+              
+              Phi->eraseFromParent();
+            }
+          }
+
+        }
+      }
 
       if (Stores.size() == 1) {
         StoreInst *OnlyStore = Stores[0];
