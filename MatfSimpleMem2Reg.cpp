@@ -133,6 +133,14 @@ static bool collectUses(AllocaInst *AI,
       std::vector<LoadInst*>  Loads;
       if (!collectUses(AI, Stores, Loads)) continue;
 
+      if (Loads.empty()) {
+        for (StoreInst *SI : Stores) { SI->eraseFromParent(); Changed = true; }
+        eraseLifetimesFor(AI);
+        if (AI->use_empty()) { AI->eraseFromParent(); Changed = true; }
+        if (MatfVerbose) errs() << "[matf-mem2reg] erased dead alloca " << (AI->hasName()?AI->getName():"<unnamed>") << "\n";
+        continue;
+      }
+
       if (MatfPhi && Stores.size() == 2) {
         StoreInst *S1 = Stores[0];
         StoreInst *S2 = Stores[1];
