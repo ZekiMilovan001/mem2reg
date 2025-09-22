@@ -18,13 +18,14 @@ This pass implements a subset of mem2reg:
 * Run:
 
 ```
-/bin/opt -load lib/MatfSimpleMem2Reg.so -enable-new-pm=0 -matf-simple-mem2reg -S input.ll -o output.ll
+./bin/opt -load lib/MatfSimpleMem2Reg.so -enable-new-pm=0 -matf-simple-mem2reg -S pat_to_/test.ll -o output_path/test_after.ll 
+
 ```
 
 Enable the restricted φ case:
 
 ```
-/bin/opt -load lib/MatfSimpleMem2Reg.so -enable-new-pm=0 -matf-simple-mem2reg -matf-phi -S input.ll -o output.llg 
+./bin/opt -load lib/MatfSimpleMem2Reg.so -enable-new-pm=0 -matf-simple-mem2reg -matf-phi -S pat_to_/test.ll -o output_path/test_after.ll
 ```
 ---
 
